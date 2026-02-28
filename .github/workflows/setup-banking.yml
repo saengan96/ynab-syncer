@@ -27,12 +27,17 @@ jobs:
         run: |
           python -c "
           import os, time, jwt, requests, uuid
-          from datetime import datetime
 
+          # 1. Load and clean the key
           app_id = os.getenv('EB_APP_ID')
-          private_key = os.getenv('EB_PRIVATE_KEY')
-
-          # 1. Create the Security Token (JWT)
+          raw_key = os.getenv('EB_PRIVATE_KEY', '').strip()
+          
+          # Fix common formatting issues if they exist
+          if not raw_key.startswith('-----BEGIN'):
+              print('Error: Your key doesn\'t start with -----BEGIN RSA PRIVATE KEY-----')
+              exit(1)
+          
+          # 2. Create the Security Token (JWT)
           iat = int(time.time())
           payload = {
               'iss': 'enablebanking.com',
@@ -40,10 +45,15 @@ jobs:
               'iat': iat,
               'exp': iat + 3600
           }
-          token = jwt.encode(payload, private_key, algorithm='RS256', headers={'kid': app_id})
+          
+          # Headers must include 'kid' (Key ID) which is your App ID
+          token = jwt.encode(payload, raw_key, algorithm='RS256', headers={'kid': app_id})
 
-          # 2. Ask Enable Banking for a Login Link
-          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+          # 3. Ask Enable Banking for a Login Link
+          headers = {
+              'Authorization': f'Bearer {token}', 
+              'Content-Type': 'application/json'
+          }
           body = {
               'aspsp': {'name': '${{ github.event.inputs.bank_id }}', 'country': 'CY'},
               'state': str(uuid.uuid4()),
@@ -54,9 +64,10 @@ jobs:
           response = requests.post('https://api.enablebanking.com/auth', json=body, headers=headers)
           
           if response.status_code == 200:
+              url = response.json().get('url')
               print('\n' + '='*50)
-              print('SUCCESS! OPEN THIS LINK:')
-              print(response.json().get('url'))
+              print('SUCCESS! OPEN THIS LINK IN YOUR BROWSER:')
+              print(url)
               print('='*50)
           else:
               print(f'Error {response.status_code}: {response.text}')
