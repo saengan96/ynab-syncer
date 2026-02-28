@@ -26,34 +26,45 @@ jobs:
           EB_PRIVATE_KEY: ${{ secrets.EB_PRIVATE_KEY }}
         run: |
           python -c "
-          import os, time, jwt, requests, uuid, base64
+          import os, time, jwt, requests, uuid
           from cryptography.hazmat.primitives import serialization
 
+          # 1. Load the Secret Data
           app_id = os.getenv('EB_APP_ID')
-          raw_val = os.getenv('EB_PRIVATE_KEY', '').strip()
-          
-          # Detect if the user used the Base64 trick or raw text
+          raw_key = os.getenv('EB_PRIVATE_KEY', '').strip()
+
           try:
-              if not raw_val.startswith('-----'):
-                  key_data = base64.b64decode(raw_val)
-              else:
-                  key_data = raw_val.encode()
-              
-              key_obj = serialization.load_pem_private_key(key_data, password=None)
-              private_key_pem = key_obj.private_bytes(
-                  encoding=serialization.Encoding.PEM,
-                  format=serialization.PrivateFormat.TraditionalOpenSSL,
-                  encryption_algorithm=serialization.NoEncryption()
+              # We load the key as an OBJECT, which PyJWT prefers
+              private_key_obj = serialization.load_pem_private_key(
+                  raw_key.encode(), 
+                  password=None
               )
           except Exception as e:
-              print(f'Key Error: {e}')
+              print(f'Key Parsing Error: {e}')
               exit(1)
 
+          # 2. Create the Security Token
           iat = int(time.time())
-          payload = {'iss': 'enablebanking.com', 'aud': 'api.enablebanking.com', 'iat': iat, 'exp': iat + 3600}
-          token = jwt.encode(payload, private_key_pem, algorithm='RS256', headers={'kid': app_id})
+          payload = {
+              'iss': 'enablebanking.com',
+              'aud': 'api.enablebanking.com',
+              'iat': iat,
+              'exp': iat + 3600
+          }
+          
+          # We pass the OBJECT (private_key_obj) directly here
+          token = jwt.encode(
+              payload, 
+              private_key_obj, 
+              algorithm='RS256', 
+              headers={'kid': app_id}
+          )
 
-          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+          # 3. Request the Login Link
+          headers = {
+              'Authorization': f'Bearer {token}', 
+              'Content-Type': 'application/json'
+          }
           body = {
               'aspsp': {'name': '${{ github.event.inputs.bank_id }}', 'country': 'CY'},
               'state': str(uuid.uuid4()),
@@ -62,5 +73,11 @@ jobs:
           }
 
           r = requests.post('https://api.enablebanking.com/auth', json=body, headers=headers)
-          print('\n' + '='*50 + '\nLINK: ' + r.json().get('url', 'Error: ' + r.text) + '\n' + '='*50)
+          
+          if r.status_code == 200:
+              print('\n' + '='*50)
+              print('LINK: ' + r.json().get('url'))
+              print('='*50)
+          else:
+              print(f'Error {r.status_code}: {r.text}')
           "
