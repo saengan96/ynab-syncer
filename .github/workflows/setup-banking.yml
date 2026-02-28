@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       bank_name:
-        description: 'Bank Name (e.g., "Bank of Cyprus", "Eurobank Cyprus", "Revolut")'
+        description: 'Bank Name (e.g., "revolut", "bank_of_cyprus", "eurobank_cy")'
         required: true
-        default: 'Bank of Cyprus'
+        default: 'bank_of_cyprus'
 
 jobs:
   get-link:
@@ -15,10 +15,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12' # We upgraded this to avoid the error
 
-      - name: Install Enable Banking SDK
-        run: pip install enablebanking-sdk
+      - name: Install Enable Banking Library
+        run: pip install enablebanking-api # Fixed library name
 
       - name: Generate Auth Link
         env:
@@ -27,22 +27,23 @@ jobs:
         run: |
           python -c "
           import os
-          from enablebanking import ApiClient, AuthApi
+          import enablebanking
           
           app_id = os.getenv('EB_APP_ID')
           key_content = os.getenv('EB_PRIVATE_KEY')
           
           # Initialize client
-          client = ApiClient('application/json', {
+          client = enablebanking.ApiClient('application/json', {
               'app_id': app_id,
               'key': key_content
           })
           
-          auth_api = AuthApi(client)
-          # We use a dummy redirect; you just need to copy the URL it sends you to
+          auth_api = enablebanking.AuthApi(client)
+          
+          # This generates the link for your bank
           response = auth_api.get_auth(
               state='setup',
-              redirect_uri='https://google.com',
+              redirect_uri='https://localhost',
               connector_name='${{ github.event.inputs.bank_name }}',
               country='CY'
           )
