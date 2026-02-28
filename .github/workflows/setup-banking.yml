@@ -1,0 +1,53 @@
+name: "Initialize Bank Connection"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bank_name:
+        description: 'Bank Name (e.g., "Bank of Cyprus", "Eurobank Cyprus", "Revolut")'
+        required: true
+        default: 'Bank of Cyprus'
+
+jobs:
+  get-link:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Enable Banking SDK
+        run: pip install enablebanking-sdk
+
+      - name: Generate Auth Link
+        env:
+          EB_APP_ID: ${{ secrets.EB_APP_ID }}
+          EB_PRIVATE_KEY: ${{ secrets.EB_PRIVATE_KEY }}
+        run: |
+          python -c "
+          import os
+          from enablebanking import ApiClient, AuthApi
+          
+          app_id = os.getenv('EB_APP_ID')
+          key_content = os.getenv('EB_PRIVATE_KEY')
+          
+          # Initialize client
+          client = ApiClient('application/json', {
+              'app_id': app_id,
+              'key': key_content
+          })
+          
+          auth_api = AuthApi(client)
+          # We use a dummy redirect; you just need to copy the URL it sends you to
+          response = auth_api.get_auth(
+              state='setup',
+              redirect_uri='https://google.com',
+              connector_name='${{ github.event.inputs.bank_name }}',
+              country='CY'
+          )
+          print('\n' + '='*50)
+          print('OPEN THIS LINK IN YOUR BROWSER TO AUTHORIZE:')
+          print(response.url)
+          print('='*50)
+          "
