@@ -1,0 +1,28 @@
+name: Sync
+
+on:
+  push:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 * * * *' # This runs it every hour
+  workflow_dispatch: # This allows you to run it manually
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install ynab-syncer
+
+      - name: Run sync
+        run: |
+          ynab-sync --config config.yaml
