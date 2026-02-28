@@ -18,7 +18,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Requirements
-        run: pip install pyjwt cryptography requests
+        run: pip install cryptography requests
 
       - name: Generate Auth Link
         env:
@@ -26,45 +26,40 @@ jobs:
           EB_PRIVATE_KEY: ${{ secrets.EB_PRIVATE_KEY }}
         run: |
           python -c "
-          import os, time, jwt, requests, uuid
-          from cryptography.hazmat.primitives import serialization
+          import os, time, json, base64, requests, uuid
+          from cryptography.hazmat.primitives import serialization, hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
 
-          # 1. Load the Secret Data
+          def b64url(data):
+              return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
+
+          # 1. Load the Key
           app_id = os.getenv('EB_APP_ID')
-          raw_key = os.getenv('EB_PRIVATE_KEY', '').strip()
-
+          raw_key = os.getenv('EB_PRIVATE_KEY', '').strip().encode('utf-8')
+          
           try:
-              # We load the key as an OBJECT, which PyJWT prefers
-              private_key_obj = serialization.load_pem_private_key(
-                  raw_key.encode(), 
-                  password=None
-              )
+              private_key = serialization.load_pem_private_key(raw_key, password=None)
           except Exception as e:
-              print(f'Key Parsing Error: {e}')
+              print(f'Key Loading Error: {e}')
               exit(1)
 
-          # 2. Create the Security Token
+          # 2. Build JWT Manually (Header + Payload)
+          header = b64url(json.dumps({'alg': 'RS256', 'typ': 'JWT', 'kid': app_id}).encode('utf-8'))
           iat = int(time.time())
-          payload = {
+          payload = b64url(json.dumps({
               'iss': 'enablebanking.com',
               'aud': 'api.enablebanking.com',
               'iat': iat,
               'exp': iat + 3600
-          }
+          }).encode('utf-8'))
           
-          # We pass the OBJECT (private_key_obj) directly here
-          token = jwt.encode(
-              payload, 
-              private_key_obj, 
-              algorithm='RS256', 
-              headers={'kid': app_id}
-          )
+          # 3. Sign Manually
+          message = f'{header}.{payload}'.encode('utf-8')
+          signature = b64url(private_key.sign(message, padding.PKCS1v15(), hashes.SHA256()))
+          token = f'{header}.{payload}.{signature}'
 
-          # 3. Request the Login Link
-          headers = {
-              'Authorization': f'Bearer {token}', 
-              'Content-Type': 'application/json'
-          }
+          # 4. API Request
+          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
           body = {
               'aspsp': {'name': '${{ github.event.inputs.bank_id }}', 'country': 'CY'},
               'state': str(uuid.uuid4()),
@@ -75,9 +70,7 @@ jobs:
           r = requests.post('https://api.enablebanking.com/auth', json=body, headers=headers)
           
           if r.status_code == 200:
-              print('\n' + '='*50)
-              print('LINK: ' + r.json().get('url'))
-              print('='*50)
+              print('\n' + '='*50 + '\nSUCCESS! OPEN THIS LINK:\n' + r.json().get('url') + '\n' + '='*50)
           else:
               print(f'Error {r.status_code}: {r.text}')
           "
