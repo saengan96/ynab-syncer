@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main, master ]
   schedule:
-    - cron: '0 * * * *' # This runs it every hour
-  workflow_dispatch: # This allows you to run it manually
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -21,8 +21,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ynab-syncer
+          pip install -r requirements.txt
 
       - name: Run sync
         run: |
-          ynab-sync --config config.yaml
+          python main.py --config config.yaml
