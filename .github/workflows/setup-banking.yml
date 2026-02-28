@@ -3,8 +3,8 @@ name: "Initialize Bank Connection"
 on:
   workflow_dispatch:
     inputs:
-      bank_name:
-        description: 'Bank Name (e.g., "revolut", "bank_of_cyprus", "eurobank_cy")'
+      bank_id:
+        description: 'Bank ID (bank_of_cyprus, revolut, or eurobank_cy)'
         required: true
         default: 'bank_of_cyprus'
 
@@ -15,10 +15,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12' # We upgraded this to avoid the error
+          python-version: '3.12'
 
-      - name: Install Enable Banking Library
-        run: pip install enablebanking-api # Fixed library name
+      - name: Install Requirements
+        run: pip install pyjwt cryptography requests
 
       - name: Generate Auth Link
         env:
@@ -26,29 +26,38 @@ jobs:
           EB_PRIVATE_KEY: ${{ secrets.EB_PRIVATE_KEY }}
         run: |
           python -c "
-          import os
-          import enablebanking
-          
+          import os, time, jwt, requests, uuid
+          from datetime import datetime
+
           app_id = os.getenv('EB_APP_ID')
-          key_content = os.getenv('EB_PRIVATE_KEY')
+          private_key = os.getenv('EB_PRIVATE_KEY')
+
+          # 1. Create the Security Token (JWT)
+          iat = int(time.time())
+          payload = {
+              'iss': 'enablebanking.com',
+              'aud': 'api.enablebanking.com',
+              'iat': iat,
+              'exp': iat + 3600
+          }
+          token = jwt.encode(payload, private_key, algorithm='RS256', headers={'kid': app_id})
+
+          # 2. Ask Enable Banking for a Login Link
+          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+          body = {
+              'aspsp': {'name': '${{ github.event.inputs.bank_id }}', 'country': 'CY'},
+              'state': str(uuid.uuid4()),
+              'redirect_url': 'https://localhost',
+              'psu_type': 'personal'
+          }
+
+          response = requests.post('https://api.enablebanking.com/auth', json=body, headers=headers)
           
-          # Initialize client
-          client = enablebanking.ApiClient('application/json', {
-              'app_id': app_id,
-              'key': key_content
-          })
-          
-          auth_api = enablebanking.AuthApi(client)
-          
-          # This generates the link for your bank
-          response = auth_api.get_auth(
-              state='setup',
-              redirect_uri='https://localhost',
-              connector_name='${{ github.event.inputs.bank_name }}',
-              country='CY'
-          )
-          print('\n' + '='*50)
-          print('OPEN THIS LINK IN YOUR BROWSER TO AUTHORIZE:')
-          print(response.url)
-          print('='*50)
+          if response.status_code == 200:
+              print('\n' + '='*50)
+              print('SUCCESS! OPEN THIS LINK:')
+              print(response.json().get('url'))
+              print('='*50)
+          else:
+              print(f'Error {response.status_code}: {response.text}')
           "
